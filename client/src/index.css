@@ -1,0 +1,67 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Кастомные брейкпоинты для карусели блоков на главной (см. Home.tsx):
+     640 - 2 блока, 900 - 3 блока, 1200 - все 4 без скролла. Именованные
+     брейкпоинты Tailwind гарантированно сортирует по возрастанию, в
+     отличие от смеси произвольных min-[…] значений. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 900px;
+  --breakpoint-lg: 1200px;
+
+  /* Умеренный национальный колорит: зелёный/белый флага + акцентный красный.
+     В остальном — чистая нейтральная палитра для читаемой учебной типографики. */
+  --color-brand-green: #47632f;
+  --color-brand-green-light: #e0e2e0;
+  --color-brand-red: #c41e3a;
+  --color-brand-red-light: #fbe9ec;
+
+  --color-ink: #1c1f1d;
+  --color-muted: #5b615c;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f2f4f2;
+  --color-border: #e2e6e2;
+  --color-paragraph: #fbfcfb;
+
+  --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--color-surface-alt);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 9s linear infinite;
+}
