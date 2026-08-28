@@ -67,16 +67,16 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  getCharacter: () => apiFetch<{ characterId: string | null }>('/character'),
+  getCharacter: () => apiFetch<{ characterId: string | null; avatar: string | null }>('/character'),
 
-  setCharacter: (characterId: string) =>
-    apiFetch<{ characterId: string }>('/character', {
+  updateCharacter: (patch: { characterId?: string; avatar?: string | null }) =>
+    apiFetch<{ characterId: string | null; avatar: string | null }>('/character', {
       method: 'PUT',
-      body: JSON.stringify({ characterId }),
+      body: JSON.stringify(patch),
     }),
 
   submitAttempt: (topicId: string, score: number, totalQuestions: number) =>
-    apiFetch<{ ok: true }>('/rating/attempts', {
+    apiFetch<{ ok: true; counted: boolean }>('/rating/attempts', {
       method: 'POST',
       body: JSON.stringify({ topicId, score, totalQuestions }),
     }),
@@ -88,7 +88,20 @@ export const api = {
     }>('/rating/me'),
 
   getLeaderboard: () =>
-    apiFetch<{ leaderboard: { rank: number; name: string; email: string; total: number }[] }>(
+    apiFetch<{ leaderboard: { rank: number; name: string; email: string; total: number }[]; seasonYear: number }>(
       '/rating/leaderboard',
     ),
+
+  getLegends: () =>
+    apiFetch<{
+      legends: { year: number; entries: { rank: number; name: string; email: string; total: number }[] }[]
+    }>('/rating/legends'),
+
+  getArtifacts: () => apiFetch<{ unlockedIds: string[]; coins: number }>('/artifacts/me'),
+
+  unlockArtifact: (artifactId: string) =>
+    apiFetch<{ ok: true }>('/artifacts/unlock', {
+      method: 'POST',
+      body: JSON.stringify({ artifactId }),
+    }),
 }

@@ -1,53 +1,33 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useCharacterStore } from '../store/character'
 import { useRatingStore } from '../store/rating'
 import CharacterAvatar from '../components/CharacterAvatar'
-import charactersData from '../data/characters.json'
 import ranks from '../data/ranks.json'
 import artifacts from '../data/artifacts.json'
-import { completedEpochsCount, EPOCH_COUNT, type Group } from '../lib/characterStage'
+import { completedEpochsCount, EPOCH_COUNT } from '../lib/characterStage'
 import { materialTopics } from '../lib/materialTopics'
-
-const groups = charactersData.groups as Group[]
-
-function findCharacter(characterId: string | null) {
-  if (!characterId) return null
-  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
-    const characterIndex = groups[groupIndex].characters.findIndex((c) => c.id === characterId)
-    if (characterIndex !== -1) {
-      const colorIndex = groupIndex * groups[groupIndex].characters.length + characterIndex
-      return { character: groups[groupIndex].characters[characterIndex], group: groups[groupIndex], colorIndex }
-    }
-  }
-  return null
-}
 
 export default function Stats() {
   const user = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
   const characterId = useCharacterStore((s) => s.characterId)
+  const avatar = useCharacterStore((s) => s.avatar)
   const fetchCharacter = useCharacterStore((s) => s.fetchCharacter)
   const byTopic = useRatingStore((s) => s.byTopic)
   const fetchMyRating = useRatingStore((s) => s.fetchMyRating)
   const leaderboard = useRatingStore((s) => s.leaderboard)
   const fetchLeaderboard = useRatingStore((s) => s.fetchLeaderboard)
-  const email = user?.email
-  const myRowRef = useRef<HTMLLIElement | null>(null)
-
-  function scrollToMe() {
-    myRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
+  const [artifactsOpen, setArtifactsOpen] = useState(0)
 
   useEffect(() => {
     fetchCharacter()
     fetchMyRating()
     fetchLeaderboard()
+    api.getArtifacts().then(({ unlockedIds }) => setArtifactsOpen(unlockedIds.length))
   }, [fetchCharacter, fetchMyRating, fetchLeaderboard])
-
-  const found = findCharacter(characterId)
-  const stage = found ? found.character.stages[0] : null
 
   const epochsDone = completedEpochsCount(byTopic)
   const epochsTotal = EPOCH_COUNT
@@ -57,35 +37,23 @@ export default function Stats() {
   const testsPassed = byTopic.filter((t) => t.totalQuestions > 0 && t.bestScore === t.totalQuestions).length
 
   const artifactsTotal = artifacts.length
-  const artifactsOpen = Math.min(epochsDone, artifactsTotal)
 
   const rankIndex = 0
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Link to="/" className="text-xl text-(--color-brand-green)">
-          ←
-        </Link>
+      <Link to="/" className="flex items-center gap-2">
+        <span className="text-xl text-(--color-brand-green)">‹</span>
         <h1 className="text-xl font-semibold text-(--color-ink)">Мой персонаж</h1>
-      </div>
+      </Link>
 
       <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
-        {found && stage ? (
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-(--color-ink)">{user?.name || 'Без имени'}</span>
-            <Link to="/stats/character" className="text-sm text-(--color-brand-green)">
-              Сменить
-            </Link>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-(--color-ink)">{user?.name || 'Без имени'}</span>
-            <Link to="/stats/character" className="text-sm text-(--color-brand-green)">
-              Выбрать персонажа
-            </Link>
-          </div>
-        )}
+        <div className="flex items-center justify-between">
+          <span className="font-medium text-(--color-ink)">{user?.name || 'Без имени'}</span>
+          <Link to="/stats/character" className="text-sm text-(--color-brand-green)">
+            {characterId ? 'Сменить' : 'Выбрать персонажа'}
+          </Link>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
@@ -140,16 +108,14 @@ export default function Stats() {
                   }`}
                 >
                   {isCurrent ? (
-                    found && stage ? (
-                      <CharacterAvatar name={found.character.name} icon={stage.icon} colorIndex={found.colorIndex} size={56} />
-                    ) : (
-                      <img src="/frame20.png" alt={rank} className="h-full w-full object-cover" />
-                    )
+                    <CharacterAvatar
+                      name={user?.name || '?'}
+                      icon={avatar ?? undefined}
+                      colorIndex={characterId === 'female' ? 1 : 0}
+                      size={56}
+                    />
                   ) : isLocked ? (
-                    <>
-                      <img src="/frame20.png" alt={rank} className="h-full w-full object-cover blur-[2px]" />
-                      <span className="absolute inset-0 flex items-center justify-center bg-(--color-surface)/40">🔒</span>
-                    </>
+                    <img src="/key.webp" alt="" className="h-6 w-6 object-contain" />
                   ) : (
                     '🏆'
                   )}
@@ -166,35 +132,22 @@ export default function Stats() {
       </div>
 
       <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-sm text-(--color-muted)">Общий рейтинг</p>
-          {leaderboard.some((entry) => entry.email === email) && (
-            <button onClick={scrollToMe} className="text-xs text-(--color-brand-green)">
-              Найти себя
-            </button>
-          )}
-        </div>
+        <Link to="/rating" className="mb-2 flex items-center gap-1.5 text-sm text-(--color-ink)">
+          <span className="font-semibold">Общий рейтинг</span>
+          <span className="text-(--color-brand-green)">›</span>
+        </Link>
         {leaderboard.length === 0 ? (
-          <p className="text-(--color-muted)">Пока никто не прошёл ни одного теста.</p>
+          <p className="text-sm text-(--color-muted)">Пока никто не прошёл ни одного теста в этом сезоне.</p>
         ) : (
           <ol className="flex flex-col gap-1">
-            {leaderboard.map((entry) => {
-              const isMe = email === entry.email
-              return (
-                <li
-                  key={entry.rank}
-                  ref={isMe ? myRowRef : undefined}
-                  className={`flex items-center justify-between rounded-lg px-2 py-1 ${
-                    isMe ? 'bg-(--color-brand-green-light)' : ''
-                  }`}
-                >
-                  <span className="text-sm text-(--color-ink)">
-                    {entry.rank}. {entry.name}
-                  </span>
-                  <span className="text-sm font-medium text-(--color-ink)">{entry.total}</span>
-                </li>
-              )
-            })}
+            {leaderboard.slice(0, 3).map((entry) => (
+              <li key={entry.rank} className="flex items-center justify-between rounded-lg px-2 py-1">
+                <span className="text-sm text-(--color-ink)">
+                  {entry.rank}. {entry.name}
+                </span>
+                <span className="text-sm font-medium text-(--color-ink)">{entry.total}</span>
+              </li>
+            ))}
           </ol>
         )}
       </div>

@@ -1,9 +1,42 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import examSections from '../data/examSections.json'
 import { useAuthStore } from '../store/auth'
 import { useRatingStore } from '../store/rating'
-import { materialTopics, materialTopicId, sections, sectionTitles } from '../lib/materialTopics'
+import { materialTopics, materialTopicId, sectionTitles, SECTION_COUNT } from '../lib/materialTopics'
+import { type DragMatchPair } from '../components/DragMatch'
+import DragMatchGame from '../components/DragMatchGame'
+
+const DRAG_TOPICS = materialTopics.slice(0, 20)
+
+const MODE_CARDS = [
+  { mode: 1 as const, title: 'Тесты по каждой теме', image: '/test1.webp' },
+  { mode: 2 as const, title: 'Перетаскивание', image: '/test2.webp' },
+  { mode: 3 as const, title: '1 минута: проверь себя', image: '/test3.webp' },
+]
+
+// Перетаскивание не влияет на рейтинг — вопросы пока сделаны только для
+// первого блока, остальные блоки открываются, но показывают заглушку.
+const PALEOLIT_PAIRS: DragMatchPair[] = [
+  { id: 'paleolit', term: 'Палеолит', definition: 'Древнейший период человеческой истории' },
+  { id: 'ashel', term: 'Ашель', definition: 'Ранний период палеолита в Абхазии' },
+  { id: 'muste', term: 'Мустье', definition: 'Средний период палеолита в Абхазии' },
+  { id: 'yashtukh', term: 'Яштух', definition: 'Стоянка мирового значения на окраине Сухума' },
+  { id: 'arhantropy', term: 'Архантропы', definition: 'Люди раннего палеолита' },
+  { id: 'neandertalcy', term: 'Неандертальцы', definition: 'Люди среднего палеолита' },
+  { id: 'neoantropy', term: 'Неоантропы', definition: 'Люди позднего палеолита (Homo sapiens)' },
+  { id: 'evropeoidnaya', term: 'Европеоидная', definition: 'Раса, к которой относится древнее население Абхазии' },
+  { id: 'rubilo', term: 'Ручное рубило', definition: 'Характерное орудие раннего палеолита' },
+  { id: 'ashel-vremya', term: '400–300 тыс. лет назад', definition: 'Начало ашельской эпохи в Абхазии' },
+  { id: 'stoyanka', term: 'Стоянка', definition: 'Памятник, дошедший до нас в неизменном виде' },
+  { id: 'mestonahozhdenie', term: 'Местонахождение', definition: 'Памятник в переотложенном природой состоянии' },
+  { id: 'rodovoy-stroy', term: 'Родовой строй', definition: 'Общественный строй позднего палеолита' },
+  { id: 'pervobytnoe-stado', term: 'Первобытное стадо', definition: 'Общественный строй раннего и среднего палеолита' },
+]
+
+const DRAG_ROUNDS = 15
+const DRAG_PAIRS_PER_ROUND = 4
+const DRAG_MAX_MISTAKES = 5
 
 interface ChoiceQuestion {
   type: 'choice'
@@ -22,8 +55,32 @@ type ExamQuestion = ChoiceQuestion | FillQuestion
 
 const questionsBySection = examSections as Record<string, Record<string, ExamQuestion[]>>
 
+// «1 минута: проверь себя» не влияет на рейтинг — считаем только количество
+// правильных ответов за минуту, а личный рекорд храним локально в браузере,
+// а не на сервере. Вопросы разбиты по эпохам (разделам); пока готовы только
+// для первой эпохи — остальные эпохи открыты, но без вопросов.
+const CHOICE_QUESTIONS_BY_SECTION: ChoiceQuestion[][] = Array.from({ length: SECTION_COUNT }, (_, sectionIndex) =>
+  Object.values(questionsBySection[String(sectionIndex)] ?? {})
+    .flat()
+    .filter((q): q is ChoiceQuestion => q.type === 'choice'),
+)
+
+const SPEED_DURATION = 60
+function speedRecordKey(sectionIdx: number) {
+  return `examSpeedRecord_${sectionIdx}`
+}
+
 function normalize(value: string) {
   return value.trim().toLowerCase()
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const copy = [...arr]
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy
 }
 
 type Mode = 1 | 2 | 3
@@ -32,16 +89,27 @@ export default function ExamMode() {
   const [mode, setMode] = useState<Mode | null>(null)
   const [sectionIndex, setSectionIndex] = useState<number | null>(null)
   const [itemNumber, setItemNumber] = useState<number | null>(null)
+  const [dragTopicIndex, setDragTopicIndex] = useState<number | null>(null)
   const [index, setIndex] = useState(0)
   const [score, setScore] = useState(0)
   const [selectedOption, setSelectedOption] = useState<number | null>(null)
   const [fillValue, setFillValue] = useState('')
   const [fillChecked, setFillChecked] = useState(false)
   const [finished, setFinished] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'not_counted' | 'error'>('idle')
+
+  const [speedSectionIndex, setSpeedSectionIndex] = useState<number | null>(null)
+  const [speedRunning, setSpeedRunning] = useState(false)
+  const [speedTimeLeft, setSpeedTimeLeft] = useState(SPEED_DURATION)
+  const [speedAnswered, setSpeedAnswered] = useState(0)
+  const [speedQuestion, setSpeedQuestion] = useState<ChoiceQuestion | null>(null)
+  const [speedFinished, setSpeedFinished] = useState(false)
+  const [speedRecords, setSpeedRecords] = useState<Record<number, number>>({})
 
   const isAuthenticated = useAuthStore((s) => s.status === 'authenticated')
+  const byTopic = useRatingStore((s) => s.byTopic)
   const submitAttempt = useRatingStore((s) => s.submitAttempt)
+  const fetchMyRating = useRatingStore((s) => s.fetchMyRating)
 
   const questions =
     sectionIndex !== null && itemNumber !== null
@@ -50,13 +118,100 @@ export default function ExamMode() {
   const question = questions[index]
   const currentTopicId = sectionIndex !== null && itemNumber !== null ? materialTopicId(sectionIndex, itemNumber) : null
 
+  function isTopicPassed(topicId: string) {
+    const entry = byTopic.find((t) => t.topicId === topicId)
+    return !!entry && entry.totalQuestions > 0 && entry.bestScore === entry.totalQuestions
+  }
+
   useEffect(() => {
     if (!finished || !currentTopicId || !isAuthenticated) return
     setSaveStatus('saving')
     submitAttempt(currentTopicId, score, questions.length)
-      .then(() => setSaveStatus('saved'))
+      .then(({ counted }) => {
+        setSaveStatus(counted ? 'saved' : 'not_counted')
+        if (counted) fetchMyRating()
+      })
       .catch(() => setSaveStatus('error'))
-  }, [finished, currentTopicId, isAuthenticated, score, questions.length, submitAttempt])
+  }, [finished, currentTopicId, isAuthenticated, score, questions.length, submitAttempt, fetchMyRating])
+
+  useEffect(() => {
+    const records: Record<number, number> = {}
+    for (let i = 0; i < SECTION_COUNT; i++) {
+      const stored = Number(localStorage.getItem(speedRecordKey(i)) ?? 0)
+      if (!Number.isNaN(stored)) records[i] = stored
+    }
+    setSpeedRecords(records)
+  }, [])
+
+  const speedAnsweredRef = useRef(0)
+  useEffect(() => {
+    speedAnsweredRef.current = speedAnswered
+  }, [speedAnswered])
+
+  useEffect(() => {
+    if (!speedRunning) return
+    if (speedTimeLeft <= 0) {
+      setSpeedRunning(false)
+      setSpeedFinished(true)
+      const sectionIdx = speedSectionIndexRef.current ?? 0
+      setSpeedRecords((prev) => {
+        const next = Math.max(prev[sectionIdx] ?? 0, speedAnsweredRef.current)
+        localStorage.setItem(speedRecordKey(sectionIdx), String(next))
+        return { ...prev, [sectionIdx]: next }
+      })
+      return
+    }
+    const timer = setTimeout(() => setSpeedTimeLeft((t) => t - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [speedRunning, speedTimeLeft])
+
+  const speedQueueRef = useRef<ChoiceQuestion[]>([])
+  const speedSectionIndexRef = useRef<number | null>(null)
+
+  function drawSpeedQuestion() {
+    if (speedQueueRef.current.length === 0) {
+      const pool = CHOICE_QUESTIONS_BY_SECTION[speedSectionIndexRef.current ?? 0]
+      let deck = shuffle(pool)
+      if (speedQuestion && deck[0] === speedQuestion) {
+        deck = [...deck.slice(1), deck[0]]
+      }
+      speedQueueRef.current = deck
+    }
+    return speedQueueRef.current.shift()!
+  }
+
+  function startSpeedRun(sectionIdx: number) {
+    speedSectionIndexRef.current = sectionIdx
+    setSpeedSectionIndex(sectionIdx)
+    setSpeedAnswered(0)
+    setSpeedTimeLeft(SPEED_DURATION)
+    setSpeedFinished(false)
+    speedQueueRef.current = []
+    setSpeedQuestion(drawSpeedQuestion())
+    setSpeedRunning(true)
+  }
+
+  function selectSpeedEpoch(sectionIdx: number) {
+    if (CHOICE_QUESTIONS_BY_SECTION[sectionIdx].length === 0) {
+      setSpeedSectionIndex(sectionIdx)
+      return
+    }
+    startSpeedRun(sectionIdx)
+  }
+
+  function answerSpeed(selectedIndex: number) {
+    if (speedQuestion && selectedIndex === speedQuestion.correctIndex) {
+      setSpeedAnswered((a) => a + 1)
+    }
+    setSpeedQuestion(drawSpeedQuestion())
+  }
+
+  function exitSpeedMode() {
+    setSpeedRunning(false)
+    setSpeedFinished(false)
+    setSpeedSectionIndex(null)
+    setMode(null)
+  }
 
   function resetRun() {
     setIndex(0)
@@ -72,23 +227,13 @@ export default function ExamMode() {
     setMode(m)
     setSectionIndex(null)
     setItemNumber(null)
+    setDragTopicIndex(null)
     resetRun()
   }
 
   function selectMaterialTopic(section: number, item: number) {
     setSectionIndex(section)
     setItemNumber(item)
-    resetRun()
-  }
-
-  function selectSection(i: number) {
-    setSectionIndex(i)
-    setItemNumber(null)
-    resetRun()
-  }
-
-  function selectItem(n: number) {
-    setItemNumber(n)
     resetRun()
   }
 
@@ -120,50 +265,122 @@ export default function ExamMode() {
   // Шаг 0: выбор варианта тренажёра
   if (mode === null) {
     return (
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <Link to="/" className="text-xl text-(--color-brand-green)">
-            ←
-          </Link>
+      <div className="flex min-h-[75svh] flex-col gap-4">
+        <Link to="/" className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
           <h1 className="text-xl font-semibold text-(--color-ink)">Тренажёр</h1>
-        </div>
-        <p className="text-(--color-muted)">Выберите вариант тестов.</p>
-        <div className="flex flex-col gap-3">
-          <button
-            onClick={() => selectMode(1)}
-            className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4 text-left"
-          >
-            <span className="font-medium text-(--color-ink)">Вариант 1</span>
-            <p className="text-sm text-(--color-muted)">Тесты по каждой теме</p>
-          </button>
-          <button
-            onClick={() => selectMode(2)}
-            className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4 text-left"
-          >
-            <span className="font-medium text-(--color-ink)">Вариант 2</span>
-            <p className="text-sm text-(--color-muted)">Тесты по разделам</p>
-          </button>
-          <button
-            onClick={() => selectMode(3)}
-            className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4 text-left"
-          >
-            <span className="font-medium text-(--color-ink)">Вариант 3</span>
-            <p className="text-sm text-(--color-muted)">Скоро появится</p>
-          </button>
+        </Link>
+        <div className="flex flex-1 flex-col gap-3" style={{ backgroundColor: '#f5f4f4' }}>
+          {MODE_CARDS.map((card) => (
+            <button
+              key={card.mode}
+              onClick={() => selectMode(card.mode)}
+              className="flex flex-1 items-center justify-center"
+            >
+              <img src={card.image} alt={card.title} className="h-full w-full object-contain" />
+            </button>
+          ))}
         </div>
       </div>
     )
   }
 
-  // Вариант 3 — пока пустой
+  if ((mode === 2 || mode === 3) && !isAuthenticated) {
+    const title = mode === 2 ? 'Перетаскивание' : '1 минута: проверь себя'
+    return (
+      <div className="flex flex-col gap-4">
+        <button onClick={() => setMode(null)} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
+        </button>
+        <p className="text-(--color-muted)">
+          <Link to="/login" className="text-(--color-brand-green)">
+            Войдите
+          </Link>
+          , чтобы играть.
+        </p>
+      </div>
+    )
+  }
+
+  // Вариант 3: 1 минута — проверь себя
   if (mode === 3) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold text-(--color-ink)">Вариант 3</h1>
-        <p className="text-(--color-muted)">Тесты этого варианта скоро появятся.</p>
-        <button onClick={() => setMode(null)} className="self-start text-(--color-brand-green)">
-          ← К выбору варианта
+        <button onClick={exitSpeedMode} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">1 минута: проверь себя</h1>
         </button>
+
+        {speedFinished ? (
+          <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
+            <p className="text-lg font-medium text-(--color-ink)">Результат: {speedAnswered}</p>
+            <p className="mt-1 text-sm text-(--color-muted)">
+              Рекорд: {speedRecords[speedSectionIndex ?? 0] ?? 0}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => startSpeedRun(speedSectionIndex ?? 0)}
+                className="rounded-xl bg-(--color-brand-green) px-4 py-3 font-medium text-(--color-surface)"
+              >
+                Ещё раз
+              </button>
+              <button
+                onClick={() => {
+                  setSpeedFinished(false)
+                  setSpeedSectionIndex(null)
+                }}
+                className="rounded-xl border border-(--color-border) px-4 py-3 font-medium text-(--color-ink)"
+              >
+                Выбрать эпоху
+              </button>
+            </div>
+          </div>
+        ) : speedRunning && speedQuestion ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between text-sm text-(--color-muted)">
+              <span>Осталось: {speedTimeLeft} сек</span>
+              <span>Ответов: {speedAnswered}</span>
+            </div>
+            <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
+              <p className="font-medium text-(--color-ink)">{speedQuestion.question}</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              {speedQuestion.options.map((option, i) => (
+                <button
+                  key={i}
+                  onClick={() => answerSpeed(i)}
+                  className="rounded-xl border border-(--color-border) bg-(--color-surface) p-3 text-left"
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : speedSectionIndex !== null ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-(--color-muted)">Вопросы для этой эпохи скоро появятся.</p>
+            <button
+              onClick={() => setSpeedSectionIndex(null)}
+              className="self-start rounded-xl border border-(--color-border) px-4 py-3 font-medium text-(--color-ink)"
+            >
+              Выбрать эпоху
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {sectionTitles.map((title, i) => (
+              <button
+                key={i}
+                onClick={() => selectSpeedEpoch(i)}
+                className="flex flex-col gap-1 rounded-xl border border-(--color-border) bg-(--color-surface) p-3 text-left text-(--color-ink)"
+              >
+                <span className="font-medium">{title}</span>
+                <span className="text-xs text-(--color-muted)">Рекорд: {speedRecords[i] ?? 0}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -172,98 +389,114 @@ export default function ExamMode() {
   if (mode === 1 && sectionIndex === null) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold text-(--color-ink)">Вариант 1</h1>
-        <p className="text-(--color-muted)">Выберите тему, по которой хотите пройти тест.</p>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-          {materialTopics.map((topic, i) => (
-            <button
-              key={`${topic.sectionIndex}-${topic.itemNumber}`}
-              onClick={() => selectMaterialTopic(topic.sectionIndex, topic.itemNumber)}
-              className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border border-(--color-border) bg-(--color-surface) p-2 text-center"
-            >
-              <span className="text-lg font-semibold text-(--color-brand-green)">{i + 1}</span>
-              <span className="line-clamp-3 text-[11px] leading-tight text-(--color-ink)">{topic.title}</span>
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setMode(null)} className="self-start text-(--color-brand-green)">
-          ← К выбору варианта
+        <button onClick={() => setMode(null)} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">Тесты</h1>
         </button>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {materialTopics.map((topic, i) => {
+            const passed = isTopicPassed(materialTopicId(topic.sectionIndex, topic.itemNumber))
+            return (
+              <button
+                key={`${topic.sectionIndex}-${topic.itemNumber}`}
+                onClick={() => selectMaterialTopic(topic.sectionIndex, topic.itemNumber)}
+                className={`relative flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center ${
+                  passed
+                    ? 'border-(--color-brand-green) bg-(--color-brand-green-light)'
+                    : 'border-(--color-border) bg-(--color-surface)'
+                }`}
+              >
+                {passed && (
+                  <span className="absolute top-1 right-1 text-xs text-(--color-brand-green)">✓</span>
+                )}
+                <span className="text-lg font-semibold text-(--color-brand-green)">{i + 1}</span>
+                <span className="line-clamp-3 text-[11px] leading-tight text-(--color-ink)">{topic.title}</span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     )
   }
 
-  // Вариант 2, шаг 1: выбор раздела
-  if (mode === 2 && sectionIndex === null) {
+  // Вариант 2: сетка из 20 блоков «Перетаскивание», открываются по очереди
+  if (mode === 2 && dragTopicIndex === null) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold text-(--color-ink)">Вариант 2</h1>
-        <p className="text-(--color-muted)">Выберите раздел, по которому хотите пройти тест.</p>
-        <div className="flex flex-col gap-3">
-          {sectionTitles.map((title, i) => (
-            <button
-              key={title}
-              onClick={() => selectSection(i)}
-              className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4 text-left"
-            >
-              <span className="font-medium text-(--color-ink)">{title}</span>
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setMode(null)} className="self-start text-(--color-brand-green)">
-          ← К выбору варианта
+        <button onClick={() => setMode(null)} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">Перетаскивание</h1>
         </button>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {DRAG_TOPICS.map((topic, i) => {
+            const passed = isTopicPassed(materialTopicId(topic.sectionIndex, topic.itemNumber))
+            const prevPassed =
+              i === 0 || isTopicPassed(materialTopicId(DRAG_TOPICS[i - 1].sectionIndex, DRAG_TOPICS[i - 1].itemNumber))
+            const locked = !prevPassed
+            return (
+              <button
+                key={`${topic.sectionIndex}-${topic.itemNumber}`}
+                onClick={() => !locked && setDragTopicIndex(i)}
+                disabled={locked}
+                className={`relative flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center ${
+                  passed
+                    ? 'border-(--color-brand-green) bg-(--color-brand-green-light)'
+                    : locked
+                      ? 'border-(--color-border) bg-(--color-surface-alt)'
+                      : 'border-(--color-border) bg-(--color-surface)'
+                }`}
+              >
+                {passed && <span className="absolute top-1 right-1 text-xs text-(--color-brand-green)">✓</span>}
+                {locked ? (
+                  <img src="/key.webp" alt="" className="h-6 w-6 object-contain" />
+                ) : (
+                  <span className="text-lg font-semibold text-(--color-brand-green)">{i + 1}</span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </div>
     )
   }
 
-  // Вариант 2, шаг 2: сетка тем раздела
-  if (mode === 2 && sectionIndex !== null && itemNumber === null) {
-    const section = sections[sectionIndex]
+  // Вариант 2: тема выбрана. Реальное перетаскивание пока есть только в
+  // первом блоке — не влияет на рейтинг, ничего никуда не отправляется.
+  if (mode === 2 && dragTopicIndex !== null) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold text-(--color-ink)">{section.title}</h1>
-        <p className="text-(--color-muted)">Выберите тему.</p>
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-          {section.items.map((item) => (
-            <button
-              key={item.number}
-              onClick={() => item.number !== undefined && selectItem(item.number)}
-              className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border border-(--color-border) bg-(--color-surface) p-2 text-center"
-            >
-              <span className="text-lg font-semibold text-(--color-brand-green)">{item.number}</span>
-              <span className="line-clamp-3 text-[11px] leading-tight text-(--color-ink)">{item.title}</span>
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setSectionIndex(null)} className="self-start text-(--color-brand-green)">
-          ← К выбору раздела
+        <button onClick={() => setDragTopicIndex(null)} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">Блок {dragTopicIndex + 1}</h1>
         </button>
+        {dragTopicIndex === 0 ? (
+          <DragMatchGame
+            pool={PALEOLIT_PAIRS}
+            rounds={DRAG_ROUNDS}
+            pairsPerRound={DRAG_PAIRS_PER_ROUND}
+            maxMistakes={DRAG_MAX_MISTAKES}
+          />
+        ) : (
+          <p className="text-(--color-muted)">Перетаскивание для этого блока скоро появится.</p>
+        )}
       </div>
     )
   }
 
-  const title =
-    mode === 1
-      ? (materialTopics.find((t) => t.sectionIndex === sectionIndex && t.itemNumber === itemNumber)?.title ?? '')
-      : `${sectionTitles[sectionIndex ?? -1] ?? ''} · §${itemNumber}`
-  const goBack =
-    mode === 1
-      ? () => {
-          setSectionIndex(null)
-          setItemNumber(null)
-        }
-      : () => setItemNumber(null)
-  const backLabel = '← К выбору темы'
+  const title = materialTopics.find((t) => t.sectionIndex === sectionIndex && t.itemNumber === itemNumber)?.title ?? ''
+  const goBack = () => {
+    setSectionIndex(null)
+    setItemNumber(null)
+  }
 
   if (questions.length === 0) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
-        <p className="text-(--color-muted)">Вопросы для этой темы скоро появятся.</p>
-        <button onClick={goBack} className="self-start text-(--color-brand-green)">
-          {backLabel}
+        <button onClick={goBack} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
         </button>
+        <p className="text-(--color-muted)">Вопросы для этой темы скоро появятся.</p>
       </div>
     )
   }
@@ -271,7 +504,10 @@ export default function ExamMode() {
   if (finished) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
+        <button onClick={goBack} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
+        </button>
         <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4">
           <p className="text-lg font-medium text-(--color-ink)">
             Результат: {score} из {questions.length}
@@ -280,6 +516,10 @@ export default function ExamMode() {
             <p className="mt-2 text-sm text-(--color-muted)">
               {saveStatus === 'saving' && 'Сохраняем результат…'}
               {saveStatus === 'saved' && 'Результат сохранён в рейтинге.'}
+              {saveStatus === 'not_counted' &&
+                (score < questions.length
+                  ? 'Есть ошибки — в рейтинг засчитываются только тесты без ошибок.'
+                  : 'Эта тема уже пройдена без ошибок — результат не засчитывается повторно.')}
               {saveStatus === 'error' && 'Не удалось сохранить результат.'}
             </p>
           ) : (
@@ -312,7 +552,10 @@ export default function ExamMode() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
+        <button onClick={goBack} className="flex items-center gap-2">
+          <span className="text-xl text-(--color-brand-green)">‹</span>
+          <h1 className="text-xl font-semibold text-(--color-ink)">{title}</h1>
+        </button>
         <span className="text-sm text-(--color-muted)">
           {index + 1} / {questions.length}
         </span>

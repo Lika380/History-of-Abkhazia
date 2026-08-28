@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { api, ApiError, NetworkError, type User } from '../lib/api'
+import { useCharacterStore } from './character'
+import { useRatingStore } from './rating'
 
 type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated' | 'network_error'
 
@@ -29,6 +31,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         set({ user: null, status: 'network_error' })
       } else {
         set({ user: null, status: 'unauthenticated' })
+        useCharacterStore.getState().reset()
+        useRatingStore.getState().resetMine()
       }
     }
   },
@@ -48,6 +52,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const { user } = await api.verifyCode(email, code)
       set({ user, status: 'authenticated' })
+      useCharacterStore.getState().fetchCharacter()
+      useRatingStore.getState().fetchMyRating()
     } catch (err) {
       set({ error: err instanceof ApiError || err instanceof NetworkError ? err.message : 'unknown_error' })
       throw err
@@ -57,6 +63,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await api.logout().catch(() => {})
     set({ user: null, status: 'unauthenticated' })
+    useCharacterStore.getState().reset()
+    useRatingStore.getState().resetMine()
   },
 
   updateName: async (name) => {

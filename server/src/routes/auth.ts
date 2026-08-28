@@ -62,13 +62,11 @@ authRouter.post('/request-code', async (req, res) => {
     expiresAt,
   ])
 
-  try {
-    await sendLoginCode(email, code)
-  } catch (err) {
+  // Не ждём реальную отправку письма — SMTP может быть медленным (особенно
+  // первое соединение после старта сервера) и превышать таймаут клиента.
+  sendLoginCode(email, code).catch((err) => {
     console.error('Failed to send login code email', err)
-    res.status(500).json({ error: 'email_send_failed' })
-    return
-  }
+  })
 
   res.json({ ok: true })
 })
@@ -135,6 +133,15 @@ authRouter.put('/name', requireAuth, async (req, res) => {
   const name = typeof req.body?.name === 'string' ? req.body.name.trim() : ''
   if (!name || name.length > 100) {
     res.status(400).json({ error: 'invalid_name' })
+    return
+  }
+
+  const [existing] = await pool.query<RowDataPacket[]>(
+    'SELECT id FROM users WHERE LOWER(name) = LOWER(?) AND id != ?',
+    [name, req.user!.id],
+  )
+  if (existing.length > 0) {
+    res.status(400).json({ error: 'name_taken' })
     return
   }
 

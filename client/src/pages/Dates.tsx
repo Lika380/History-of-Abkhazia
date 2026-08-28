@@ -15,12 +15,10 @@ export default function Dates() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <Link to="/" className="text-xl text-(--color-brand-green)">
-          ←
-        </Link>
+      <Link to="/" className="flex items-center gap-2">
+        <span className="text-xl text-(--color-brand-green)">‹</span>
         <h1 className="text-xl font-semibold text-(--color-ink)">Даты</h1>
-      </div>
+      </Link>
 
       <input
         type="text"

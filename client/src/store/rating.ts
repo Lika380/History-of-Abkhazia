@@ -24,9 +24,11 @@ interface RatingState {
   myStatus: RatingStatus
   leaderboard: LeaderboardEntry[]
   leaderboardStatus: RatingStatus
+  seasonYear: number | null
   fetchMyRating: () => Promise<void>
   fetchLeaderboard: () => Promise<void>
-  submitAttempt: (topicId: string, score: number, totalQuestions: number) => Promise<void>
+  submitAttempt: (topicId: string, score: number, totalQuestions: number) => Promise<{ counted: boolean }>
+  resetMine: () => void
 }
 
 export const useRatingStore = create<RatingState>((set) => ({
@@ -35,6 +37,7 @@ export const useRatingStore = create<RatingState>((set) => ({
   myStatus: 'idle',
   leaderboard: [],
   leaderboardStatus: 'idle',
+  seasonYear: null,
 
   fetchMyRating: async () => {
     set({ myStatus: 'loading' })
@@ -49,14 +52,17 @@ export const useRatingStore = create<RatingState>((set) => ({
   fetchLeaderboard: async () => {
     set({ leaderboardStatus: 'loading' })
     try {
-      const { leaderboard } = await api.getLeaderboard()
-      set({ leaderboard, leaderboardStatus: 'loaded' })
+      const { leaderboard, seasonYear } = await api.getLeaderboard()
+      set({ leaderboard, seasonYear, leaderboardStatus: 'loaded' })
     } catch {
       set({ leaderboardStatus: 'error' })
     }
   },
 
   submitAttempt: async (topicId, score, totalQuestions) => {
-    await api.submitAttempt(topicId, score, totalQuestions)
+    const { counted } = await api.submitAttempt(topicId, score, totalQuestions)
+    return { counted }
   },
+
+  resetMine: () => set({ myTotal: 0, byTopic: [], myStatus: 'idle' }),
 }))

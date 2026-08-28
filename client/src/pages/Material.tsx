@@ -47,7 +47,7 @@ export default function Material() {
       <div className="flex flex-col gap-4">
         <p className="text-(--color-muted)">Материал не найден.</p>
         <Link to="/flashcards" className="text-(--color-brand-green)">
-          ← К содержанию
+          ‹ К содержанию
         </Link>
       </div>
     )
@@ -56,7 +56,7 @@ export default function Material() {
   return (
     <div className="-mx-4 -my-6 flex min-h-svh flex-col gap-4 bg-(--color-paragraph) p-4">
       <Link to="/flashcards" className="text-sm text-(--color-brand-green) print:hidden">
-        ← К содержанию
+        ‹ К содержанию
       </Link>
 
       <h1 className="text-xl font-semibold text-(--color-ink)">{found.title}</h1>

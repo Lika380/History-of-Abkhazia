@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import toc from '../data/tableOfContents.json'
 
 interface TocItem {
@@ -25,15 +26,20 @@ function TocRow({ id, item }: { id: string; item: TocItem }) {
 
 export default function Flashcards() {
   const sections = toc.sections as TocSection[]
+  const location = useLocation()
+
+  useEffect(() => {
+    if (!location.hash) return
+    const el = document.getElementById(location.hash.slice(1))
+    el?.scrollIntoView({ block: 'start' })
+  }, [location.hash])
 
   return (
     <div className="flex flex-col gap-4 print:gap-3">
-      <div className="flex items-center gap-2 print:hidden">
-        <Link to="/" className="text-xl text-(--color-brand-green)">
-          ←
-        </Link>
+      <Link to="/" className="flex items-center gap-2 print:hidden">
+        <span className="text-xl text-(--color-brand-green)">‹</span>
         <h1 className="text-xl font-semibold text-(--color-ink)">Материал для печати</h1>
-      </div>
+      </Link>
 
       <div className="rounded-2xl border border-(--color-border) bg-(--color-surface) p-4 print:rounded-none print:border-0 print:p-0">
         <ul className="mb-4 flex flex-col gap-1">
@@ -43,7 +49,7 @@ export default function Flashcards() {
         </ul>
 
         {sections.map((section, sectionIndex) => (
-          <div key={section.title} className="mb-4 break-inside-avoid">
+          <div key={section.title} id={`section-${sectionIndex}`} className="mb-4 scroll-mt-4 break-inside-avoid">
             <h3 className="mb-2 text-sm font-semibold text-(--color-ink)">{section.title}</h3>
             <ul className="flex flex-col gap-1">
               {section.items.map((item) => (

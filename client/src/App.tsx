@@ -10,6 +10,8 @@ import { useCharacterStore } from './store/character'
 const Home = lazy(() => import('./pages/Home'))
 const Quiz = lazy(() => import('./pages/Quiz'))
 const Flashcards = lazy(() => import('./pages/Flashcards'))
+const Media = lazy(() => import('./pages/Media'))
+const Rating = lazy(() => import('./pages/Rating'))
 const Material = lazy(() => import('./pages/Material'))
 const Dates = lazy(() => import('./pages/Dates'))
 const Artifacts = lazy(() => import('./pages/Artifacts'))
@@ -50,12 +52,14 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/quiz/:topicId" element={<Quiz />} />
           <Route path="/flashcards" element={<Flashcards />} />
+          <Route path="/media" element={<Media />} />
+          <Route path="/rating" element={<Rating />} />
           <Route path="/material/:id" element={<Material />} />
           <Route path="/dates" element={<Dates />} />
-          <Route path="/artifacts" element={<Artifacts />} />
           <Route path="/exam" element={<ExamMode />} />
           <Route path="/login" element={<Login />} />
           <Route element={<RequireAuth />}>
+            <Route path="/artifacts" element={<Artifacts />} />
             <Route path="/stats" element={<Stats />} />
             <Route path="/stats/character" element={<CharacterSelect />} />
           </Route>
